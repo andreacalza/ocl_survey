@@ -1,6 +1,6 @@
-avalanche-lib==0.4.0
-hydra-core==1.3.2
+avalanche-lib==0.6.0
+hydra-core==1.3.3
 jsonlines==4.0.0
-kornia==0.7.0
-ray[default]==2.8.1
+kornia==0.8.3
+ray[default]==2.56.0
 hyperopt

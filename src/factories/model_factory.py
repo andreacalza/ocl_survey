@@ -9,12 +9,19 @@ from avalanche.training.plugins import LRSchedulerPlugin
 from src.toolkit.slim_resnet18 import SlimResNet18
 
 
-def create_model(model_type: str, input_size):
+def create_model(model_type: str, input_size, n_classes_per_exp=None):
     if model_type == "slim_resnet18":
         model = SlimResNet18(1, input_size=input_size)
-    if model_type == "resnet18":
+    elif model_type == "mt_slim_resnet18":
+        assert (
+            n_classes_per_exp is not None
+        ), "mt_slim_resnet18 requires n_classes_per_exp to build its multi-head classifier"
+        # MTSlimResNet18 already embeds its own MultiHeadClassifier,
+        # which grows a new head per task label automatically
+        return models.MTSlimResNet18(n_classes_per_exp)
+    elif model_type == "resnet18":
         model = tvmodels.resnet18()
-    if model_type == "resnet50":
+    elif model_type == "resnet50":
         model = tvmodels.resnet50()
 
     last_layer_name, in_features = utils.get_last_layer_name(model)

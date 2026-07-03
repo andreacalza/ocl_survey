@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - experiment.yaml
+  - override /benchmark: split_cifar100_til.yaml
+  - override /scheduler: null.yaml
+  - override /optimizer: sgd.yaml
+  - override /model: mt_slimresnet18.yaml
+  - _self_
+
+evaluation:
+  num_gpus: 0.15
+  num_cpus: 1
+  num_actors: 3
+
+strategy:
+  train_epochs: 3
+  train_mb_size: 10
+  mem_size: 2000
+  # Required for the dynamic multi-head model: with task boundaries the online
+  # experiences expose their origin experience, so MultiHeadClassifier can add a
+  # new head per task. Without it, avalanche adapts on the online micro-experience
+  # (no classes_in_this_experience) and adaptation crashes.
+  use_task_boundaries: true

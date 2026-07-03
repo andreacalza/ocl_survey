@@ -1,0 +1,10 @@
+defaults:
+  - evaluation.yaml
+
+# Anytime inference: evaluate every `eval_every` *global* training steps via
+# AnytimeEvalPlugin (see method_factory / src/toolkit/anytime_eval.py). Set to
+# 100 for every-100-steps. peval_mode is kept for reference but the built-in
+# PeriodicEval is disabled when anytime_eval is true.
+anytime_eval: true
+eval_every: 50
+peval_mode: iteration

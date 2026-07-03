@@ -1,0 +1,16 @@
+defaults:
+  - nc_scenario.yaml
+
+dataset_name: "cifar100"
+
+factory_args:
+  benchmark_name: split_cifar100
+  n_experiences: 10
+  # val_size MUST stay 0 for the multi-head (task-incremental) setup: on
+  # avalanche-lib >= 0.5 benchmark_with_validation_stream returns plain
+  # DatasetExperience objects that drop task labels, which breaks the
+  # multi-head model. With val_size=0 main.py evaluates on the test stream.
+  val_size: 0
+  use_transforms: true
+  fixed_class_order: null
+  return_task_id: true

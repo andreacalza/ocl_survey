@@ -12,7 +12,7 @@ import avalanche.logging as logging
 import src.toolkit.utils as utils
 from avalanche.evaluation.metrics import (StreamTime, accuracy_metrics,
                                           loss_metrics)
-from avalanche.models import SCRModel
+from avalanche.models import SCRModel, MultiTaskModule, avalanche_forward
 from avalanche.training.plugins import (EarlyStoppingPlugin, MIRPlugin,
                                         RARPlugin, ReplayPlugin,
                                         SupervisedPlugin)
@@ -28,6 +28,7 @@ from src.toolkit.cumulative_accuracies import CumulativeAccuracyPluginMetric
 from src.toolkit.json_logger import JSONLogger
 from src.toolkit.lambda_scheduler import LambdaScheduler
 from src.toolkit.metrics import ClockLoggingPlugin, TimeSinceStart
+from src.toolkit.anytime_eval import AnytimeEvalPlugin
 from src.toolkit.parallel_eval import ParallelEvaluationPlugin
 from src.toolkit.probing import ProbingPlugin
 from src.toolkit.review_trick import ReviewTrickPlugin
@@ -37,6 +38,28 @@ from src.toolkit.sklearn_probing import SKLearnProbingPlugin
 """
 Method Factory
 """
+
+
+def _as_multitask_strategy(strategy_cls):
+    """Return a subclass of ``strategy_cls`` whose ``forward`` is always
+    task-aware.
+
+    Needed for multi-head models (e.g. mt_slim_resnet18) trained online: on
+    avalanche-lib >= 0.5 the ``OnlineCLExperience`` does not expose a
+    ``task_labels`` attribute, so the default ``SupervisedProblem.forward``
+    falls back to a task-agnostic ``model(x)`` call and the multi-head model
+    crashes for lack of task labels. The per-sample task ids are still present
+    in the minibatch (``self.mb_task_id``), so we route through
+    ``avalanche_forward`` unconditionally.
+    """
+
+    class _MultiTaskStrategy(strategy_cls):
+        def forward(self):
+            return avalanche_forward(self.model, self.mb_x, self.mb_task_id)
+
+    _MultiTaskStrategy.__name__ = f"MultiTask{strategy_cls.__name__}"
+    _MultiTaskStrategy.__qualname__ = _MultiTaskStrategy.__name__
+    return _MultiTaskStrategy
 
 
 def create_strategy(
@@ -72,7 +95,11 @@ def create_strategy(
 
     strategy_dict.update(strategy_eval_args)
 
-    if name == "er":
+    if name == "naive":
+        # Plain fine-tuning baseline: no replay, no extra plugins.
+        strategy = "Naive"
+
+    elif name == "er":
         strategy = "Naive"
         specific_args = utils.extract_kwargs(
             ["mem_size", "batch_size_mem"], strategy_kwargs
@@ -292,7 +319,32 @@ def create_strategy(
         strategy_dict["eval_every"] = -1
         plugins.append(parallel_eval_plugin)
 
-    cl_strategy = globals()[strategy](**strategy_dict, plugins=plugins)
+    # Anytime (every-N-steps) evaluation for the online setting. The built-in
+    # PeriodicEval keys off the per-experience iteration counter, which resets
+    # on every OnlineCLScenario sub-experience and therefore evaluates at almost
+    # every step. Disable it and evaluate every `eval_every` *global* steps via
+    # AnytimeEvalPlugin, which is inserted into the plugin chain below (it must
+    # run after the EvaluationPlugin, exactly like PeriodicEval does).
+    use_anytime_eval = (
+        parallel_eval_plugin is None
+        and evaluation_kwargs is not None
+        and evaluation_kwargs.get("anytime_eval", False)
+    )
+    if use_anytime_eval:
+        strategy_dict["eval_every"] = -1
+
+    strategy_cls = globals()[strategy]
+    if isinstance(strategy_dict["model"], MultiTaskModule):
+        strategy_cls = _as_multitask_strategy(strategy_cls)
+
+    cl_strategy = strategy_cls(**strategy_dict, plugins=plugins)
+
+    if use_anytime_eval:
+        # Insert right before the Clock (the last plugin), i.e. the same slot
+        # PeriodicEval occupies: after the EvaluationPlugin so per-step metrics
+        # are still collected, before the Clock so the mini-batch is intact.
+        anytime_plugin = AnytimeEvalPlugin(eval_every=evaluation_kwargs["eval_every"])
+        cl_strategy.plugins.insert(len(cl_strategy.plugins) - 1, anytime_plugin)
 
     return cl_strategy
 

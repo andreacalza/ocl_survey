@@ -7,8 +7,6 @@ import numpy as np
 import torch
 import os
 
-from avalanche.benchmarks import dataset_benchmark
-from avalanche.benchmarks.utils import AvalancheSubset
 from avalanche.models.dynamic_modules import IncrementalClassifier
 
 

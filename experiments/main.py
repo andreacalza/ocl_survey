@@ -14,7 +14,7 @@ import src.factories.method_factory as method_factory
 import src.factories.model_factory as model_factory
 import src.toolkit.utils as utils
 from avalanche.benchmarks.scenarios import OnlineCLScenario
-from src.factories.benchmark_factory import DS_SIZES
+from src.factories.benchmark_factory import DS_CLASSES, DS_SIZES
 
 
 @hydra.main(config_path="../config", config_name="config.yaml")
@@ -28,9 +28,20 @@ def main(config):
         dataset_root=config.benchmark.dataset_root,
     )
 
+    n_classes_per_exp = None
+    if config.model.model_type == "mt_slim_resnet18":
+        benchmark_name = config.benchmark.factory_args.benchmark_name
+        n_experiences = config.benchmark.factory_args.n_experiences
+        assert DS_CLASSES[benchmark_name] % n_experiences == 0, (
+            f"{benchmark_name} classes ({DS_CLASSES[benchmark_name]}) must be "
+            f"evenly divisible by n_experiences ({n_experiences}) for mt_slim_resnet18"
+        )
+        n_classes_per_exp = DS_CLASSES[benchmark_name] // n_experiences
+
     model = model_factory.create_model(
         **config["model"],
         input_size=DS_SIZES[config.benchmark.factory_args.benchmark_name],
+        n_classes_per_exp=n_classes_per_exp,
     )
 
     optimizer, scheduler_plugin = model_factory.get_optimizer(
@@ -92,6 +103,15 @@ def main(config):
     print("Using strategy: ", strategy.__class__.__name__)
     print("With plugins: ", strategy.plugins)
 
+    # benchmark_with_validation_stream is only applied when val_size > 0; with
+    # val_size == 0 (e.g. the multi-head task-incremental setup) the scenario
+    # has no valid_stream, so we fall back to evaluating on the test stream.
+    eval_stream = (
+        scenario.valid_stream
+        if hasattr(scenario, "valid_stream")
+        else scenario.test_stream
+    )
+
     batch_streams = scenario.streams.values()
     for t, experience in enumerate(scenario.train_stream):
         if config.experiment.train_online:
@@ -101,13 +121,15 @@ def main(config):
                 experience_size=config.strategy.train_mb_size,
                 access_task_boundaries=config.strategy.use_task_boundaries,
             )
-            train_stream = ocl_scenario.train_stream
+            # avalanche-lib >= 0.5 exposes the online stream via the streams
+            # dict ("train_online") instead of the old .train_stream attribute.
+            train_stream = ocl_scenario.streams["train_online"]
         else:
             train_stream = experience
 
         strategy.train(
             train_stream,
-            eval_streams=[scenario.valid_stream[: t + 1]],
+            eval_streams=[eval_stream[: t + 1]],
             num_workers=0,
             drop_last=True,
             reset_optimizer_state=False,
