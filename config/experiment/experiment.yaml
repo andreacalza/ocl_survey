@@ -1,6 +1,9 @@
 experiment:
   seed: 0
   save_models: false
+  # Save a checkpoint every evaluation.eval_every steps under <logdir>/checkpoints/
+  # for offline LP/SNR analysis (scripts/analysis/compute_lp.py, compute_snr.py).
+  save_checkpoints: false
   train_online: true
   logdir: null
   debug: false

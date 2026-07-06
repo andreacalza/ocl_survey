@@ -89,6 +89,15 @@ def main(config):
     else:
         logdir = config.experiment.logdir
 
+    # Periodic checkpointing for offline representation analysis (LP / SNR).
+    # Saves the model every `evaluation.eval_every` global steps — the same
+    # cadence as the anytime evaluation — under <logdir>/checkpoints/.
+    if config.experiment.get("save_checkpoints", False):
+        from src.toolkit.checkpoint_plugin import CheckpointEveryNStepsPlugin
+        plugins.append(
+            CheckpointEveryNStepsPlugin(logdir, every=config.evaluation.eval_every)
+        )
+
     strategy = method_factory.create_strategy(
         model=model,
         optimizer=optimizer,
