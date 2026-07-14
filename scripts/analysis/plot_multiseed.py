@@ -64,8 +64,9 @@ def analyse_json(path):
         for i, v in a.items():
             R[j][i] = v
     final = [R[n - 1][i] for i in range(n)]
-    fg = [max(R[j][i] for j in range(i, n) if R[j][i] is not None) - R[n - 1][i]
-          for i in range(n - 1)]
+    # shallow forgetting, definizione del paper: F = A_jj - A_ij (learned - final),
+    # coerente con il deep forgetting calcolato in read_curve().
+    fg = [R[i][i] - R[n - 1][i] for i in range(n - 1)]
     return mean(final), mean(fg)
 
 
@@ -124,65 +125,71 @@ def main():
     ers = sorted(b for b in data if b > 0)
     nv = data.get(0)
 
+    # Il Naive ha buffer=0, che non sta su un asse log: lo posizioniamo in un punto
+    # fittizio a sinistra del buffer pi\`u piccolo, cos\`i entra nella curva come
+    # primo punto (etichetta "0") e la discesa \`e visibile per intero.
+    NAIVE_X = ers[0] * 0.45
+
     def series(key):
-        xs = ers
-        m = [ms(data[b][key])[0] for b in xs]
-        s = [ms(data[b][key])[1] for b in xs]
+        """x, mean, std includendo il Naive come primo punto (a NAIVE_X)."""
+        xs = ([NAIVE_X] if nv else []) + ers
+        vals = ([nv[key]] if nv else []) + [data[b][key] for b in ers]
+        m = [ms(v)[0] for v in vals]
+        s = [ms(v)[1] for v in vals]
         return xs, m, s
 
-    def naive_ref(ax, key, color):
-        if not nv:
-            return
-        m, s = ms(nv[key])
-        ax.axhline(m, ls="--", lw=1.2, color=color, alpha=.8)
-        ax.axhspan(m - s, m + s, color=color, alpha=.10, lw=0)
-        ax.annotate("Naive", xy=(ers[0], m), xytext=(4, 4),
-                    textcoords="offset points", fontsize=9, color=color)
+    def buffer_ticks(ax):
+        ax.set_xscale("log")
+        ticks = ([NAIVE_X] if nv else []) + ers
+        labels = (["0"] if nv else []) + [str(b) for b in ers]
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels, rotation=45, fontsize=8)
+        ax.minorticks_off()
+        # linea verticale sottile che separa "no replay" (Naive) dal regime con replay
+        if nv:
+            ax.axvline((NAIVE_X * ers[0]) ** 0.5, color="#bbbbbb", lw=.8, ls=":")
 
-    common = dict(alpha=.3, which="both")
+    common = dict(alpha=.3, which="major")
 
     # 1) deep vs shallow forgetting vs buffer
-    fig, ax = plt.subplots(figsize=(6.4, 4.6))
+    fig, ax = plt.subplots(figsize=(6.6, 4.6))
     for key, col, mk, lab in [("deep", BLUE, "o", "deep (linear probe)"),
                               ("shallow", ORANGE, "s", "shallow (output)")]:
         xs, m, s = series(key)
         ax.errorbar(xs, m, yerr=s, marker=mk, ms=6, lw=1.8, capsize=3,
                     color=col, label=lab)
-        naive_ref(ax, key, col)
     ax.axhline(0, lw=.8, color="#999999")
-    ax.set_xscale("log")
-    ax.set(xlabel="buffer size (log)", ylabel="forgetting",
+    buffer_ticks(ax)
+    ax.set(xlabel="buffer size (0 = Naive)", ylabel="forgetting",
            title="Deep vs shallow forgetting across buffer sizes")
     ax.legend(frameon=False); ax.grid(**common)
     fig.savefig(os.path.join(outdir, "forgetting_vs_buffer.png"),
                 dpi=200, bbox_inches="tight")
 
     # 2) Top1 vs LP accuracy — the replay efficiency gap
-    fig, ax = plt.subplots(figsize=(6.4, 4.6))
+    fig, ax = plt.subplots(figsize=(6.6, 4.6))
     for key, col, mk, lab in [("lp", BLUE, "o", "linear-probe acc (features)"),
                               ("top1", ORANGE, "s", "output acc (Top-1)")]:
         xs, m, s = series(key)
         ax.errorbar(xs, m, yerr=s, marker=mk, ms=6, lw=1.8, capsize=3,
                     color=col, label=lab)
-        naive_ref(ax, key, col)
     xs, mlp, _ = series("lp"); _, mtop, _ = series("top1")
     ax.fill_between(xs, mtop, mlp, where=[a > b for a, b in zip(mlp, mtop)],
                     color=BLUE, alpha=.08, lw=0)
-    ax.set_xscale("log")
-    ax.set(xlabel="buffer size (log)", ylabel="accuracy",
+    buffer_ticks(ax)
+    ax.set(xlabel="buffer size (0 = Naive)", ylabel="accuracy",
            title="Replay efficiency gap: features vs classifier")
     ax.legend(frameon=False); ax.grid(**common)
     fig.savefig(os.path.join(outdir, "accuracy_gap_vs_buffer.png"),
                 dpi=200, bbox_inches="tight")
 
     # 3) SNR vs buffer
-    fig, ax = plt.subplots(figsize=(6.4, 4.6))
+    fig, ax = plt.subplots(figsize=(6.6, 4.6))
     xs, m, s = series("snr")
     ax.errorbar(xs, m, yerr=s, marker="o", ms=6, lw=1.8, capsize=3,
                 color=BLUE, label="SNR")
-    naive_ref(ax, "snr", BLUE)
-    ax.set_xscale("log")
-    ax.set(xlabel="buffer size (log)", ylabel="final SNR",
+    buffer_ticks(ax)
+    ax.set(xlabel="buffer size (0 = Naive)", ylabel="final SNR",
            title="Feature separability (SNR) vs buffer size")
     ax.grid(**common)
     fig.savefig(os.path.join(outdir, "snr_vs_buffer.png"),

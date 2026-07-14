@@ -10,7 +10,7 @@ accuracy matrix R[j][i] = accuracy on experience i right after training experien
 
 From R we report, per run:
   * final avg accuracy   = mean_i R[T-1][i]                      (higher = better)
-  * average forgetting   = mean_{i<T-1} ( max_{j>=i} R[j][i] - R[T-1][i] )  (lower = better)
+  * average forgetting   = mean_{i<T-1} ( R[i][i] - R[T-1][i] )   (paper Sec. A.1; lower = better)
 
 Usage:
     python scripts/analysis/compute_forgetting.py results/                 # auto-discover runs
@@ -68,11 +68,12 @@ def analyse(logs_json):
 
     final = [R[n - 1][i] for i in range(n)]
     learned = [R[i][i] for i in range(n)]
-    # forgetting only defined for experiences seen before the last one
+    # shallow forgetting per the reference paper (Sec. A.1):
+    #   F_i = A_ii - A_(T-1),i  (accuracy right after learning task i minus final).
+    # Same convention as the deep-forgetting computation, so the two are comparable.
     forgetting = []
     for i in range(n - 1):
-        peak = max(R[j][i] for j in range(i, n) if R[j][i] is not None)
-        forgetting.append(peak - R[n - 1][i])
+        forgetting.append(learned[i] - final[i])
 
     return {
         "n_experiences": n,
