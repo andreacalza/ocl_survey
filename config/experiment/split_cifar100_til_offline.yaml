@@ -1,0 +1,38 @@
+# @package _global_
+
+# Offline (multi-epoch) control experiment for the TIL multi-head setup.
+#
+# Purpose: the online single-pass runs measure A_jj on a backbone that is still
+# far from converged, so `F = A_jj - A_final` mixes genuine forgetting with
+# backbone maturation over the remaining tasks and can go negative. Training the
+# same setup offline (many passes per task) drives A_jj to its ceiling, removing
+# the maturation term, and makes the forgetting numbers comparable to the
+# reference paper (Lanzillotta et al., Table 4).
+#
+# Everything is identical to split_cifar100_til.yaml except train_online and
+# train_epochs, so online-vs-offline is the only variable that changes.
+
+defaults:
+  - experiment.yaml
+  - override /benchmark: split_cifar100_til.yaml
+  - override /scheduler: null.yaml
+  - override /optimizer: sgd.yaml
+  - override /model: mt_slimresnet18.yaml
+  - _self_
+
+experiment:
+  train_online: false
+
+evaluation:
+  num_gpus: 0.15
+  num_cpus: 1
+  num_actors: 3
+
+strategy:
+  # Offline: train_epochs = full passes over the task's 5000 samples.
+  # (In online mode the same field means gradient steps per 10-sample
+  # micro-batch, which is why the two regimes read differently.)
+  train_epochs: 20
+  train_mb_size: 10
+  mem_size: 2000
+  use_task_boundaries: true
