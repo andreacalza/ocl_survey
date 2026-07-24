@@ -107,8 +107,12 @@ def main():
         # introduces by measuring 'learned' before the task actually ended.
         cfg = OmegaConf.load(os.path.join(args.run_dir, "config.yaml"))
         n_tasks = cfg.benchmark.factory_args.n_experiences
-        max_step = all_ckpts[-1][0]
-        steps_per_task = max_step / n_tasks
+        # Derive steps-per-task from the TRAINING CONFIG, not from the last
+        # checkpoint: the final step is usually NOT checkpointed (the plugin
+        # fires inside after_training_iteration), so max_step underestimates the
+        # stream length and every boundary would drift.
+        n_per_task = len(train_map[min(train_map)].dataset)
+        steps_per_task = (n_per_task // cfg.strategy.train_mb_size) * cfg.strategy.train_epochs
         checkpoints, seen = [], set()
         for t in range(n_tasks):
             target = (t + 1) * steps_per_task
