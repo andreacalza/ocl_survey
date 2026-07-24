@@ -60,7 +60,16 @@ def accuracy_matrix(checkpoints):
     return R, n
 
 
-def analyse(logs_json):
+def analyse(logs_json, reference="learned"):
+    """Per-task forgetting against a chosen reference.
+
+    reference="learned" (default): F_i = A_ii - A_(T-1),i, i.e. accuracy right
+        after learning task i minus final (reference paper Sec. A.1; matches the
+        deep-forgetting computation, so shallow and deep are comparable).
+    reference="peak": F_i = max_t A_ti - A_(T-1),i, i.e. the HIGHEST accuracy
+        ever reached on task i (over all anytime checkpoints) minus final
+        (Chaudhry-style classic forgetting; always >= 0).
+    """
     checkpoints = load_checkpoints(logs_json)
     if not checkpoints:
         return None
@@ -68,18 +77,21 @@ def analyse(logs_json):
 
     final = [R[n - 1][i] for i in range(n)]
     learned = [R[i][i] for i in range(n)]
-    # shallow forgetting per the reference paper (Sec. A.1):
-    #   F_i = A_ii - A_(T-1),i  (accuracy right after learning task i minus final).
-    # Same convention as the deep-forgetting computation, so the two are comparable.
-    forgetting = []
-    for i in range(n - 1):
-        forgetting.append(learned[i] - final[i])
+    # peak over the whole stream (max across every anytime checkpoint), incl. final,
+    # so peak >= final and peak-based forgetting is non-negative.
+    peak = [max(c[i] for c in checkpoints if i in c) for i in range(n)]
+
+    ref = peak if reference == "peak" else learned
+    forgetting = [ref[i] - final[i] for i in range(n - 1)]
 
     return {
         "n_experiences": n,
         "n_checkpoints": len(checkpoints),
+        "reference": reference,
         "final_acc_per_exp": final,
         "learned_acc_per_exp": learned,
+        "peak_acc_per_exp": peak,
+        "reference_acc_per_exp": ref,
         "avg_final_acc": sum(final) / n,
         "forgetting_per_exp": forgetting,
         "avg_forgetting": sum(forgetting) / len(forgetting) if forgetting else 0.0,
@@ -113,16 +125,23 @@ def main():
     ap.add_argument("paths", nargs="+", help="run dirs or a results/ root to scan")
     ap.add_argument("--per-exp", action="store_true",
                     help="also print per-experience final accuracy and forgetting")
+    ap.add_argument("--peak", action="store_true",
+                    help="reference = peak accuracy ever reached (Chaudhry classic, "
+                         "always >=0) instead of the accuracy right after learning")
     args = ap.parse_args()
+
+    reference = "peak" if args.peak else "learned"
 
     runs = discover_runs(args.paths)
     if not runs:
         print("No logs.json found under the given paths.")
         return
 
+    ref_col = "peak" if args.peak else "learned"
+    print(f"[reference = {reference}]")
     rows = []
     for run in runs:
-        res = analyse(os.path.join(run, "logs.json"))
+        res = analyse(os.path.join(run, "logs.json"), reference=reference)
         label = run_label(run)
         if res is None:
             print(f"[skip] {label}: logs.json empty (job unfinished/killed?)")
@@ -131,11 +150,11 @@ def main():
         if args.per_exp:
             print(f"\n=== {label} ({res['n_experiences']} exps, "
                   f"{res['n_checkpoints']} checkpoints) ===")
-            print("exp | learned | final  | forgetting")
+            print(f"exp | {ref_col:>7} | final  | forgetting")
             for i in range(res["n_experiences"]):
                 f = res["forgetting_per_exp"][i] if i < len(res["forgetting_per_exp"]) else None
                 fs = f"{f:+.4f}" if f is not None else "   -   "
-                print(f"{i:3d} | {res['learned_acc_per_exp'][i]:.4f}  | "
+                print(f"{i:3d} | {res['reference_acc_per_exp'][i]:.4f}  | "
                       f"{res['final_acc_per_exp'][i]:.4f} | {fs}")
 
     print("\n" + "=" * 60)
